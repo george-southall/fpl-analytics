@@ -32,5 +32,8 @@ Thumbs.db
 # Jupyter
 .ipynb_checkpoints/
 
+# Streamlit secrets
+.streamlit/secrets.toml
+
 # Claude
 .claude/
