@@ -4,6 +4,10 @@ Run with:
     streamlit run dashboard/app.py
 """
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 import streamlit as st
 
 st.set_page_config(
@@ -26,19 +30,19 @@ st.markdown(
 col1, col2, col3, col4 = st.columns(4)
 
 with col1:
-    st.page_link("pages/01_player_projections.py", label="📊 Player Projections", use_container_width=True)
+    st.page_link("pages/01_Player_Projections.py", label="📊 Player Projections", use_container_width=True)
 with col2:
-    st.page_link("pages/02_fixture_difficulty.py", label="📅 Fixture Difficulty", use_container_width=True)
+    st.page_link("pages/02_Fixture_Difficulty.py", label="📅 Fixture Difficulty", use_container_width=True)
 with col3:
-    st.page_link("pages/03_team_strengths.py", label="💪 Team Strengths", use_container_width=True)
+    st.page_link("pages/03_Team_Strengths.py", label="💪 Team Strengths", use_container_width=True)
 with col4:
-    st.page_link("pages/04_squad_optimiser.py", label="🧮 Squad Optimiser", use_container_width=True)
+    st.page_link("pages/04_Squad_Optimiser.py", label="🧮 Squad Optimiser", use_container_width=True)
 
 col5, col6 = st.columns(2)
 with col5:
-    st.page_link("pages/05_transfer_planner.py", label="🔄 Transfer Planner", use_container_width=True)
+    st.page_link("pages/05_Transfer_Planner.py", label="🔄 Transfer Planner", use_container_width=True)
 with col6:
-    st.page_link("pages/06_price_changes.py", label="💰 Price Change Alerts", use_container_width=True)
+    st.page_link("pages/06_Price_Changes.py", label="💰 Price Change Alerts", use_container_width=True)
 
 st.divider()
 st.caption(
