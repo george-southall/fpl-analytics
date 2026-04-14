@@ -50,6 +50,23 @@ def load_fpl_data():
     return players, teams, fixtures, gameweeks
 
 
+def _detect_dgw_player_ids(fixtures_df, players_df, upcoming_gws: list[int]) -> set[int]:
+    """Return player IDs whose team has 2+ fixtures in any of the upcoming GWs."""
+    pending = fixtures_df[
+        (~fixtures_df["finished"].astype(bool)) &
+        (fixtures_df["event"].isin(upcoming_gws))
+    ]
+    # Count fixtures per team per GW
+    team_gw_counts: dict[tuple, int] = {}
+    for _, f in pending.iterrows():
+        for team in (f["team_h_name"], f["team_a_name"]):
+            key = (team, f["event"])
+            team_gw_counts[key] = team_gw_counts.get(key, 0) + 1
+
+    dgw_teams = {team for (team, _), count in team_gw_counts.items() if count >= 2}
+    return set(players_df[players_df["team_name"].isin(dgw_teams)]["id"].tolist())
+
+
 @st.cache_data(ttl=3600, show_spinner="Computing projections…")
 def load_projections(horizon: int = 6):
     """Run the full projection engine. Cached per horizon value."""
@@ -57,7 +74,18 @@ def load_projections(horizon: int = 6):
 
     players, _, fixtures, _ = load_fpl_data()
     ts = load_model()
-    return run_projections(players, fixtures, ts.model, horizon=horizon)
+
+    pending = fixtures[~fixtures["finished"].astype(bool)]
+    all_gws = sorted(pending["event"].dropna().unique().astype(int).tolist())
+    upcoming_gws = all_gws[:horizon]
+    dgw_ids = _detect_dgw_player_ids(fixtures, players, upcoming_gws)
+
+    return run_projections(
+        players, fixtures, ts.model,
+        horizon=horizon,
+        dgw_ids=dgw_ids,
+        upcoming_gws=upcoming_gws,
+    )
 
 
 @st.cache_data(ttl=3600, show_spinner="Computing fixture difficulty…")

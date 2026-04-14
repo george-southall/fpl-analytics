@@ -31,17 +31,22 @@ class TeamStrengths:
         return self.to_dataframe()
 
     def to_dataframe(self) -> pd.DataFrame:
-        """Convert fitted parameters to a clean DataFrame."""
-        if self._params is None:
-            self._params = self.model.params
-        if self._params is None:
+        """Convert fitted parameters to a clean DataFrame.
+
+        Always reads from self.model.params so that teams added via
+        register_team() after fitting are included.
+        """
+        # Always use the live params (not the cached _params) so any teams
+        # injected via register_team() after fitting are included.
+        params = self.model.params
+        if params is None:
             raise RuntimeError("Model not fitted. Call fit() first.")
 
         now = datetime.now(timezone.utc).isoformat()
         rows = []
-        for i, team in enumerate(self._params.teams):
-            att = float(self._params.attack[i])
-            def_ = float(self._params.defence[i])
+        for i, team in enumerate(params.teams):
+            att = float(params.attack[i])
+            def_ = float(params.defence[i])
             rows.append(
                 {
                     "team": team,
