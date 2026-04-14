@@ -33,9 +33,10 @@ def _availability_factor(row: pd.Series) -> float:
 
 def compute_xmins(
     players_df: pd.DataFrame,
-    history_map: dict[int, pd.DataFrame],
+    history_map: dict[int, pd.DataFrame] | None = None,
     dgw_ids: set[int] | None = None,
     window: int | None = None,
+    current_gw: int | None = None,
 ) -> pd.DataFrame:
     """Compute expected minutes per player for one upcoming gameweek.
 
@@ -43,14 +44,18 @@ def compute_xmins(
         players_df: Master player DataFrame from FPL API.
         history_map: Dict of player_id → GW history DataFrame
                      (columns: minutes, round). Fetched from element-summary.
+                     If None or empty, falls back to season-average minutes.
         dgw_ids: Set of player IDs who have a double gameweek (play twice).
         window: Number of trailing GWs to average. Defaults to settings value.
+        current_gw: Current gameweek number (used to compute season averages).
 
     Returns:
         players_df with added columns: trailing_mins, availability, xMins
     """
     window = window or settings.trailing_minutes_window
     dgw_ids = dgw_ids or set()
+    history_map = history_map or {}
+    gws_played = max((current_gw or 20) - 1, 1)
 
     rows = []
     for _, player in players_df.iterrows():
@@ -61,9 +66,11 @@ def compute_xmins(
             recent = hist.sort_values("round", ascending=False).head(window)
             trailing_mins = float(recent["minutes"].mean())
         else:
-            # No history — assume starter-level minutes if price suggests it
-            price = player.get("price", player.get("now_cost", 40) / 10)
-            trailing_mins = 70.0 if price >= 6.0 else 45.0
+            # Fall back to season-average using total minutes from the API.
+            # This is far more accurate than a price-based heuristic: a player
+            # with 14 season minutes correctly gets ~0.5 xMins, not 45.
+            season_mins = float(player.get("minutes", 0) or 0)
+            trailing_mins = season_mins / gws_played
 
         availability = _availability_factor(player)
         base_xmins = trailing_mins * availability

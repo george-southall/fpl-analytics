@@ -4,12 +4,18 @@ Runs the PuLP LP to select an optimal 15-man squad and displays it
 on an interactive pitch graphic.
 """
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+
 import plotly.graph_objects as go
 import streamlit as st
 
-from dashboard.data_loader import POSITION_COLOURS, load_fpl_data, load_model
+from dashboard.data_loader import POSITION_COLOURS, load_fpl_data, load_model, upcoming_gw_list
 from fpl_analytics.optimiser.captain_picker import pick_captain
 from fpl_analytics.optimiser.squad_optimiser import optimise_squad
+from fpl_analytics.projections.fixture_difficulty import compute_fixture_difficulty
 from fpl_analytics.projections.projection_engine import run_projections
 
 st.set_page_config(page_title="Squad Optimiser · FPL Analytics", layout="wide")
@@ -18,7 +24,7 @@ st.title("🧮 Squad Optimiser")
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.header("Settings")
-    budget = st.slider("Budget (£m)", 80.0, 105.0, 100.0, step=0.5)
+    budget = st.slider("Budget (£m)", 80.0, 115.0, 110.0, step=0.5)
     horizon = st.radio("Projection window", [1, 3, 6], index=2, horizontal=True)
     run_btn = st.button("⚡ Optimise squad", type="primary", use_container_width=True)
 
@@ -35,9 +41,27 @@ with st.spinner("Running optimiser…"):
         ts = load_model()
         projections = run_projections(players, fixtures, ts.model, horizon=horizon)
         solution = optimise_squad(projections, xpts_col=xpts_col, budget=budget)
+        gws = upcoming_gw_list(horizon)
+        diff_df = compute_fixture_difficulty(fixtures, ts.model, gws)
     except Exception as e:
         st.error(f"Optimisation failed: {e}")
         st.stop()
+
+# Build fixture schedule lookup: team → list of "GW{n}(H/A)" strings
+_team_fixtures: dict[str, list[str]] = {}
+if not diff_df.empty:
+    for _, row in diff_df.iterrows():
+        team = row["team"]
+        label = f"GW{row['gw']}({row['venue']})"
+        if row.get("is_dgw"):
+            label += "×2"
+        _team_fixtures.setdefault(team, []).append(label)
+
+
+def _fixture_tag(team_name: str) -> str:
+    """Return a compact fixture string for a player's team."""
+    fx = _team_fixtures.get(team_name, [])
+    return " · ".join(fx) if fx else "BGW"
 
 import pandas as pd
 squad = pd.concat([solution.starters, solution.bench]).reset_index(drop=True)
@@ -126,9 +150,14 @@ def _pitch_figure(starters: "pd.DataFrame", formation: tuple, xpts_col: str) -> 
         fig.add_annotation(x=x, y=y + 0.01, text=f"<b>{name}</b>",
                             showarrow=False, font=dict(size=9, color="black"),
                             xanchor="center", yanchor="middle")
-        # Price + xPts
-        fig.add_annotation(x=x, y=y - 0.04, text=f"£{price:.1f}m · {xpts:.1f}",
+        # Price + xPts + fixture
+        team_name = str(row.get("team", ""))
+        fx = _fixture_tag(team_name)
+        fig.add_annotation(x=x, y=y - 0.035, text=f"£{price:.1f}m · {xpts:.1f}",
                            showarrow=False, font=dict(size=7.5, color="#222"),
+                           xanchor="center", yanchor="middle")
+        fig.add_annotation(x=x, y=y - 0.065, text=fx,
+                           showarrow=False, font=dict(size=6.5, color="#444"),
                            xanchor="center", yanchor="middle")
 
     fig.update_layout(
@@ -151,10 +180,12 @@ bench_cols = st.columns(4)
 for i, (_, p) in enumerate(solution.bench.iterrows()):
     name = p.get("web_name", p.get("name", ""))
     with bench_cols[i]:
+        fx = _fixture_tag(str(p.get("team", "")))
         st.markdown(
             f"<div style='background:{POSITION_COLOURS.get(p['position'],'#888')};"
             f"padding:8px;border-radius:8px;text-align:center'>"
-            f"<b>{name}</b><br>£{p['price']:.1f}m<br>{p[xpts_col]:.1f} xPts</div>",
+            f"<b>{name}</b><br>£{p['price']:.1f}m · {p[xpts_col]:.1f} xPts"
+            f"<br><span style='font-size:11px;color:#333'>{fx}</span></div>",
             unsafe_allow_html=True,
         )
 

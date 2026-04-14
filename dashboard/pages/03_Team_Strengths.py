@@ -4,12 +4,16 @@ Scatter plot and bar charts of Dixon-Coles attack/defence ratings.
 Optional comparison with a user-pasted reference dataset.
 """
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
-from dashboard.data_loader import load_model
+from dashboard.data_loader import load_fpl_data, load_model
 
 st.set_page_config(page_title="Team Strengths · FPL Analytics", layout="wide")
 st.title("💪 Team Strengths")
@@ -23,6 +27,14 @@ with st.spinner("Loading model…"):
         st.stop()
 
 df = ts.to_dataframe()
+
+# Filter to current Premier League teams only (exclude relegated/historical teams)
+try:
+    _players, _teams, _, _ = load_fpl_data()
+    current_pl_teams = set(_teams["name"].tolist())
+    df = df[df["team"].isin(current_pl_teams)]
+except Exception:
+    pass  # fallback: show all teams
 
 # ── Model quality metrics ─────────────────────────────────────────────────────
 c1, c2, c3, c4 = st.columns(4)

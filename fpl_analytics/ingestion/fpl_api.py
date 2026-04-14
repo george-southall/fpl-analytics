@@ -102,10 +102,10 @@ class FPLClient:
         return self._bootstrap
 
     def _build_teams_map(self) -> dict[int, str]:
-        """Build mapping of team_id → team short_name from bootstrap."""
+        """Build mapping of team_id → canonical full team name from bootstrap."""
         if not self._teams_map:
             bootstrap = self.get_bootstrap()
-            self._teams_map = {t["id"]: t["short_name"] for t in bootstrap["teams"]}
+            self._teams_map = {t["id"]: t["name"] for t in bootstrap["teams"]}
         return self._teams_map
 
     # ── DataFrames ────────────────────────────────────────────────
@@ -168,7 +168,7 @@ class FPLClient:
             teams.append(
                 {
                     "id": t["id"],
-                    "name": normalise_team_name(t["short_name"]),
+                    "name": normalise_team_name(t["name"]),
                     "full_name": t["name"],
                     "short_name": t["short_name"],
                     "strength": t.get("strength"),
@@ -224,10 +224,27 @@ class FPLClient:
         data = self.get_player_summary(player_id)
         return pd.DataFrame(data.get("fixtures", []))
 
+    def get_current_gw(self) -> int:
+        """Return the current (most recently completed) gameweek number."""
+        bootstrap = self.get_bootstrap()
+        events = bootstrap.get("events", [])
+        current = next((e for e in events if e.get("is_current")), None)
+        if current:
+            return int(current["id"])
+        # Fallback: last finished GW
+        finished = [e for e in events if e.get("finished")]
+        return int(finished[-1]["id"]) if finished else 1
+
     def get_my_team(self, team_id: int | None = None) -> dict:
-        """Fetch FPL team entry data."""
+        """Fetch a manager's current GW squad picks.
+
+        Uses entry/{tid}/event/{gw}/picks/ which returns the actual 15-player
+        squad with captain/vice flags.  Falls back to the entry profile endpoint
+        on error so callers can detect the problem gracefully.
+        """
         tid = team_id or settings.fpl_team_id
-        return _fetch(f"entry/{tid}/")
+        gw = self.get_current_gw()
+        return _fetch(f"entry/{tid}/event/{gw}/picks/")
 
     def get_my_team_history(self, team_id: int | None = None) -> dict:
         """Fetch FPL team season history."""

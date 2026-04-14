@@ -4,6 +4,11 @@ Heat map: teams × upcoming GWs, coloured by difficulty (1=easy, 5=hard).
 Toggle between attacking view (xG for) and defensive view (CS probability).
 """
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+
 import numpy as np
 import plotly.graph_objects as go
 import streamlit as st
@@ -58,19 +63,30 @@ teams = sorted(pivot.index.tolist())
 pivot = pivot.loc[teams]
 col_labels = [f"GW{gw}" for gw in pivot.columns]
 
+# Build DGW lookup: (team, gw) → True if double gameweek
+dgw_set = set()
+if "is_dgw" in diff_df.columns:
+    dgw_set = set(
+        diff_df[diff_df["is_dgw"]][["team", "gw"]]
+        .itertuples(index=False, name=None)
+    )
+
 z = pivot.values.tolist()
 text = []
-for row_i, row in enumerate(pivot.itertuples(index=False)):
+for team in teams:
     text_row = []
-    for val in row:
+    for gw_num in pivot.columns:
+        val = pivot.loc[team, gw_num]
+        is_dgw = (team, gw_num) in dgw_set
+        suffix = "×2" if is_dgw else ""
         if np.isnan(val):
             text_row.append("BGW")
         elif metric_col == "difficulty":
-            text_row.append(str(int(val)))
+            text_row.append(str(int(val)) + suffix)
         elif metric_col == "cs_prob":
-            text_row.append(f"{val*100:.0f}%")
+            text_row.append(f"{val*100:.0f}%{suffix}")
         else:
-            text_row.append(f"{val:.2f}")
+            text_row.append(f"{val:.2f}{suffix}")
     text.append(text_row)
 
 # Colour scale: for difficulty, green=easy(1), red=hard(5); reverse for CS%

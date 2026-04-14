@@ -3,6 +3,10 @@
 Fetches your current FPL squad and recommends optimal transfers.
 """
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
 import pandas as pd
 import streamlit as st
 
@@ -19,7 +23,7 @@ st.title("🔄 Transfer Planner")
 with st.sidebar:
     st.header("Your Team")
     team_id = st.number_input("FPL Team ID", value=settings.fpl_team_id, step=1)
-    free_transfers = st.radio("Free transfers", [1, 2], horizontal=True)
+    free_transfers = st.radio("Free transfers", [1, 2, 3, 4, 5], horizontal=True)
     max_transfers = st.radio("Max transfers to consider", [1, 2, 3], index=1, horizontal=True)
     horizon = st.radio("Projection window (GWs)", [1, 3, 6], index=0, horizontal=True)
     itb = st.number_input("In the bank (£m)", value=0.0, step=0.1, min_value=0.0)

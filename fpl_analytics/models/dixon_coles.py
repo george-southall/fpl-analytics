@@ -402,3 +402,44 @@ class DixonColesModel:
         if self.params is None:
             raise RuntimeError("Model not fitted. Call fit() first.")
         return float(self.params.defence[self._team_idx[team]])
+
+    def register_team(
+        self,
+        name: str,
+        attack: float | None = None,
+        defence: float | None = None,
+    ) -> None:
+        """Add a team to the fitted model with given (or mean) parameters.
+
+        Used for newly promoted teams that have no historical Premier League
+        data and therefore were not included during fitting.  The team is
+        appended with the mean attack and defence of all currently fitted teams
+        if explicit values are not supplied.
+
+        Args:
+            name: Canonical team name (must match the normalised FPL name).
+            attack: Attack rating. Defaults to mean of fitted teams.
+            defence: Defence rating. Defaults to mean of fitted teams.
+        """
+        if self.params is None:
+            raise RuntimeError("Model not fitted. Call fit() first.")
+        if name in self._team_idx:
+            return  # already registered
+
+        mean_atk = float(self.params.attack.mean())
+        mean_def = float(self.params.defence.mean())
+        atk = attack if attack is not None else mean_atk
+        dfc = defence if defence is not None else mean_def
+
+        self.params = DixonColesParams(
+            teams=self.params.teams + [name],
+            attack=np.append(self.params.attack, atk),
+            defence=np.append(self.params.defence, dfc),
+            home_adv=self.params.home_adv,
+            rho=self.params.rho,
+            log_likelihood=self.params.log_likelihood,
+            converged=self.params.converged,
+        )
+        self._teams = self.params.teams
+        self._team_idx[name] = len(self._teams) - 1
+        logger.info(f"Registered unknown team '{name}' (atk={atk:.3f}, def={dfc:.3f})")
