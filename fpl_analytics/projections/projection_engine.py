@@ -119,7 +119,7 @@ def run_projections(
     gw_cols: list[str] = []
     gw_detail: dict[str, list] = {}  # gw_label → list of xpts per player
 
-    for gw in upcoming_gws:
+    for gw_idx, gw in enumerate(upcoming_gws):
         gw_label = f"GW{gw}_xPts"
         gw_cols.append(gw_label)
         gw_detail[gw_label] = []
@@ -129,47 +129,30 @@ def run_projections(
             (fixtures_df["event"] == gw) & (~fixtures_df["finished"].astype(bool))
         ]
 
+        # Pre-compute predictions for every unique fixture in this GW — avoids
+        # calling predictor.predict() ~700× per GW when there are only ~10 fixtures.
+        # Key: team_name → (team_xg, team_xgc, cs_prob)
+        team_pred_cache: dict[str, tuple[float, float, float]] = {}
+        for _, fix_row in gw_fixes.iterrows():
+            h = fix_row["team_h_name"]
+            a = fix_row["team_a_name"]
+            if h not in known_teams or a not in known_teams:
+                continue
+            pred = predictor.predict(h, a)
+            team_pred_cache[h] = (pred.home_xg, pred.away_xg, pred.home_cs_prob)
+            team_pred_cache[a] = (pred.away_xg, pred.home_xg, pred.away_cs_prob)
+
+        decay = 0.95 ** gw_idx
+
         for _, player in players.iterrows():
             team = player.get("team_name", "")
             xmins = float(player.get("xMins", 0))
 
-            if xmins <= 0 or team not in known_teams:
+            if xmins <= 0 or team not in known_teams or team not in team_pred_cache:
                 gw_detail[gw_label].append(0.0)
                 continue
 
-            # Find this player's fixture in this GW
-            fix = gw_fixes[
-                (gw_fixes["team_h_name"] == team) | (gw_fixes["team_a_name"] == team)
-            ]
-
-            if fix.empty:
-                # Blank gameweek for this team
-                gw_detail[gw_label].append(0.0)
-                continue
-
-            fix_row = fix.iloc[0]
-            is_home = fix_row["team_h_name"] == team
-            opponent = fix_row["team_a_name"] if is_home else fix_row["team_h_name"]
-
-            if opponent not in known_teams:
-                gw_detail[gw_label].append(0.0)
-                continue
-
-            # Get match prediction
-            if is_home:
-                pred = predictor.predict(team, opponent)
-                team_xg = pred.home_xg
-                team_xgc = pred.away_xg
-                cs_prob = pred.home_cs_prob
-            else:
-                pred = predictor.predict(opponent, team)
-                team_xg = pred.away_xg
-                team_xgc = pred.home_xg
-                cs_prob = pred.away_cs_prob
-
-            # Apply confidence decay for further-out GWs
-            gw_idx = upcoming_gws.index(gw)
-            decay = 0.95 ** gw_idx
+            team_xg, team_xgc, cs_prob = team_pred_cache[team]
 
             breakdown = calculate_player_xpts(
                 player_id=int(player["id"]),

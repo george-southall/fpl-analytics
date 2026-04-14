@@ -18,6 +18,7 @@ Scores and Inefficiencies in the Football Betting Market.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 import numpy as np
@@ -44,11 +45,7 @@ class DixonColesParams:
 
 
 def _tau(x: int, y: int, lambda_: float, mu: float, rho: float) -> float:
-    """Dixon-Coles correction factor for low-scoring outcomes.
-
-    Adjusts the joint probability for scorelines 0-0, 1-0, 0-1, and 1-1
-    where the independent Poisson assumption is weakest.
-    """
+    """Dixon-Coles correction factor for low-scoring outcomes (scalar version)."""
     if x == 0 and y == 0:
         return 1.0 - lambda_ * mu * rho
     elif x == 0 and y == 1:
@@ -61,27 +58,6 @@ def _tau(x: int, y: int, lambda_: float, mu: float, rho: float) -> float:
         return 1.0
 
 
-def _match_log_likelihood(
-    home_goals: int,
-    away_goals: int,
-    lambda_: float,
-    mu: float,
-    rho: float,
-    weight: float = 1.0,
-) -> float:
-    """Log-likelihood contribution of a single match."""
-    tau = _tau(home_goals, away_goals, lambda_, mu, rho)
-    if tau <= 0:
-        return -50.0 * weight  # penalty for invalid tau
-
-    log_lik = (
-        np.log(tau)
-        + poisson.logpmf(home_goals, lambda_)
-        + poisson.logpmf(away_goals, mu)
-    )
-    return log_lik * weight
-
-
 def _neg_log_likelihood(
     params: np.ndarray,
     home_goals: np.ndarray,
@@ -91,7 +67,7 @@ def _neg_log_likelihood(
     weights: np.ndarray,
     n_teams: int,
 ) -> float:
-    """Negative log-likelihood for the full dataset.
+    """Vectorised negative log-likelihood for the full dataset.
 
     Parameter vector layout:
         [0 : n_teams]           = log(attack) for each team
@@ -108,23 +84,40 @@ def _neg_log_likelihood(
     defence = np.exp(log_defence)
     home_adv = np.exp(log_home_adv)
 
-    # Expected goals
-    lambda_ = attack[home_idx] * defence[away_idx] * home_adv
-    mu = attack[away_idx] * defence[home_idx]
+    # Expected goals — vectorised over all matches
+    lam = attack[home_idx] * defence[away_idx] * home_adv  # (N,)
+    mu = attack[away_idx] * defence[home_idx]               # (N,)
 
-    # Vectorised log-likelihood (tau correction applied per-match)
-    total_ll = 0.0
-    for i in range(len(home_goals)):
-        total_ll += _match_log_likelihood(
-            int(home_goals[i]),
-            int(away_goals[i]),
-            lambda_[i],
-            mu[i],
-            rho,
-            weights[i],
-        )
+    # Poisson log-PMF for each match: k*log(rate) - rate - lgamma(k+1)
+    hg = home_goals.astype(float)
+    ag = away_goals.astype(float)
+    lgamma_h = np.array([math.lgamma(int(g) + 1) for g in hg])
+    lgamma_a = np.array([math.lgamma(int(g) + 1) for g in ag])
+    log_pois = (
+        hg * np.log(lam) - lam - lgamma_h
+        + ag * np.log(mu) - mu - lgamma_a
+    )
 
-    return -total_ll
+    # Tau correction — only 4 scorelines differ from 1.0
+    log_tau = np.zeros(len(home_goals))
+    m00 = (home_goals == 0) & (away_goals == 0)
+    m01 = (home_goals == 0) & (away_goals == 1)
+    m10 = (home_goals == 1) & (away_goals == 0)
+    m11 = (home_goals == 1) & (away_goals == 1)
+
+    tau_vals = np.ones(len(home_goals))
+    tau_vals[m00] = 1.0 - lam[m00] * mu[m00] * rho
+    tau_vals[m01] = 1.0 + lam[m01] * rho
+    tau_vals[m10] = 1.0 + mu[m10] * rho
+    tau_vals[m11] = 1.0 - rho
+
+    # Clamp to avoid log(<=0); heavily penalise invalid tau
+    valid = tau_vals > 0
+    log_tau[valid] = np.log(tau_vals[valid])
+    log_tau[~valid] = -50.0
+
+    total_ll = np.dot(weights, log_tau + log_pois)
+    return -float(total_ll)
 
 
 class DixonColesModel:
@@ -135,6 +128,113 @@ class DixonColesModel:
         self.params: DixonColesParams | None = None
         self._teams: list[str] = []
         self._team_idx: dict[str, int] = {}
+
+    def _fit_with_torch(
+        self,
+        home_goals: np.ndarray,
+        away_goals: np.ndarray,
+        home_idx: np.ndarray,
+        away_idx: np.ndarray,
+        weights: np.ndarray,
+        n_teams: int,
+        ref_idx: int = 0,
+        max_iter: int = 500,
+    ):
+        """Fit Dixon-Coles parameters using PyTorch LBFGS (GPU-accelerated).
+
+        Returns the scipy-style result namespace with attributes .x, .fun, .success.
+        Falls back gracefully; caller handles exceptions.
+        """
+        import torch  # noqa: PLC0415
+
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        logger.info(f"  PyTorch fitting on device: {device}")
+
+        # Convert data to tensors (float64 for numerical precision)
+        hg = torch.tensor(home_goals, dtype=torch.float64, device=device)
+        ag = torch.tensor(away_goals, dtype=torch.float64, device=device)
+        hi = torch.tensor(home_idx, dtype=torch.long, device=device)
+        ai = torch.tensor(away_idx, dtype=torch.long, device=device)
+        w = torch.tensor(weights, dtype=torch.float64, device=device)
+
+        # Precompute lgamma once
+        lgamma_h = torch.lgamma(hg + 1)
+        lgamma_a = torch.lgamma(ag + 1)
+
+        # Parameters: log-space for positivity (float64)
+        log_attack = torch.zeros(n_teams, dtype=torch.float64, device=device, requires_grad=True)
+        log_defence = torch.zeros(n_teams, dtype=torch.float64, device=device, requires_grad=True)
+        log_home_adv = torch.tensor([np.log(1.25)], dtype=torch.float64, device=device, requires_grad=True)
+        rho_param = torch.tensor([-0.05], dtype=torch.float64, device=device, requires_grad=True)
+
+        optimizer = torch.optim.LBFGS(
+            [log_attack, log_defence, log_home_adv, rho_param],
+            max_iter=max_iter,
+            tolerance_grad=1e-7,
+            tolerance_change=1e-9,
+            line_search_fn="strong_wolfe",
+        )
+
+        def closure():
+            optimizer.zero_grad()
+
+            # Enforce identifiability: ref team attack = 1 → log_attack[ref_idx] = 0
+            with torch.no_grad():
+                log_attack[ref_idx] = 0.0
+
+            lam = torch.exp(log_attack[hi] + log_defence[ai] + log_home_adv)
+            mu = torch.exp(log_attack[ai] + log_defence[hi])
+            rho = rho_param[0]
+
+            log_pois = (
+                hg * torch.log(lam) - lam - lgamma_h
+                + ag * torch.log(mu) - mu - lgamma_a
+            )
+
+            # Tau correction
+            tau = torch.ones(len(hg), dtype=torch.float64, device=device)
+            m00 = (hg == 0) & (ag == 0)
+            m01 = (hg == 0) & (ag == 1)
+            m10 = (hg == 1) & (ag == 0)
+            m11 = (hg == 1) & (ag == 1)
+            tau = torch.where(m00, 1.0 - lam * mu * rho, tau)
+            tau = torch.where(m01, 1.0 + lam * rho, tau)
+            tau = torch.where(m10, 1.0 + mu * rho, tau)
+            tau = torch.where(m11, 1.0 - rho, tau)
+
+            log_tau = torch.log(tau.clamp(min=1e-10))
+            loss = -torch.dot(w, log_tau + log_pois)
+            loss.backward()
+            return loss
+
+        optimizer.step(closure)
+
+        with torch.no_grad():
+            log_attack[ref_idx] = 0.0
+            x_out = np.concatenate([
+                log_attack.cpu().numpy(),
+                log_defence.cpu().numpy(),
+                log_home_adv.cpu().numpy(),
+                rho_param.cpu().numpy(),
+            ])
+            loss_val = float(-np.dot(
+                weights,
+                np.log(np.ones(len(home_goals))),  # placeholder; recompute below
+            ))
+
+        # Re-evaluate final NLL on CPU for consistency
+        final_nll = _neg_log_likelihood(
+            x_out, home_goals, away_goals, home_idx, away_idx, weights, n_teams
+        )
+
+        class _Result:
+            pass
+
+        res = _Result()
+        res.x = x_out
+        res.fun = final_nll
+        res.success = True
+        return res
 
     def fit(self, results_df: pd.DataFrame) -> DixonColesParams:
         """Fit the model to historical results.
@@ -189,15 +289,33 @@ class DixonColesModel:
         # Bounds: rho typically in [-1, 1], log params unbounded
         bounds = [(None, None)] * (2 * n_teams + 1) + [(-1.5, 1.5)]
 
-        result = minimize(
-            _neg_log_likelihood,
-            x0,
-            args=(home_goals, away_goals, home_idx, away_idx, weights, n_teams),
-            method="SLSQP",
-            constraints=constraints,
-            bounds=bounds,
-            options={"maxiter": 500, "ftol": 1e-10},
-        )
+        # Try PyTorch GPU path first; fall back to scipy SLSQP
+        result = None
+        try:
+            import torch  # noqa: PLC0415
+            if torch.cuda.is_available():
+                logger.info("  CUDA available — fitting with PyTorch LBFGS on GPU")
+                result = self._fit_with_torch(
+                    home_goals, away_goals, home_idx, away_idx, weights, n_teams
+                )
+            else:
+                logger.info("  CUDA not available — falling back to scipy SLSQP")
+        except ImportError:
+            logger.info("  PyTorch not installed — using scipy SLSQP")
+        except Exception as exc:
+            logger.warning(f"  PyTorch fitting failed ({exc}) — falling back to scipy")
+            result = None
+
+        if result is None:
+            result = minimize(
+                _neg_log_likelihood,
+                x0,
+                args=(home_goals, away_goals, home_idx, away_idx, weights, n_teams),
+                method="SLSQP",
+                constraints=constraints,
+                bounds=bounds,
+                options={"maxiter": 500, "ftol": 1e-10},
+            )
 
         attack = np.exp(result.x[:n_teams])
         defence = np.exp(result.x[n_teams : 2 * n_teams])
@@ -250,7 +368,7 @@ class DixonColesModel:
     def predict_score_proba(
         self, home_team: str, away_team: str, max_goals: int = 7
     ) -> np.ndarray:
-        """Compute the full scoreline probability matrix.
+        """Compute the full scoreline probability matrix (vectorised).
 
         Returns:
             (max_goals+1) x (max_goals+1) matrix where [i, j] = P(home=i, away=j).
@@ -261,15 +379,15 @@ class DixonColesModel:
         lambda_, mu = self.predict_expected_goals(home_team, away_team)
         rho = self.params.rho
 
-        matrix = np.zeros((max_goals + 1, max_goals + 1))
-        for i in range(max_goals + 1):
-            for j in range(max_goals + 1):
-                tau = _tau(i, j, lambda_, mu, rho)
-                matrix[i, j] = (
-                    tau
-                    * poisson.pmf(i, lambda_)
-                    * poisson.pmf(j, mu)
-                )
+        goals = np.arange(max_goals + 1)
+        # Outer product of independent Poisson PMFs
+        matrix = np.outer(poisson.pmf(goals, lambda_), poisson.pmf(goals, mu))
+
+        # Apply tau corrections only to the 4 affected cells
+        matrix[0, 0] *= 1.0 - lambda_ * mu * rho
+        matrix[0, 1] *= 1.0 + lambda_ * rho
+        matrix[1, 0] *= 1.0 + mu * rho
+        matrix[1, 1] *= 1.0 - rho
 
         return matrix
 
