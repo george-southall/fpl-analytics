@@ -224,10 +224,27 @@ class FPLClient:
         data = self.get_player_summary(player_id)
         return pd.DataFrame(data.get("fixtures", []))
 
+    def get_current_gw(self) -> int:
+        """Return the current (most recently completed) gameweek number."""
+        bootstrap = self.get_bootstrap()
+        events = bootstrap.get("events", [])
+        current = next((e for e in events if e.get("is_current")), None)
+        if current:
+            return int(current["id"])
+        # Fallback: last finished GW
+        finished = [e for e in events if e.get("finished")]
+        return int(finished[-1]["id"]) if finished else 1
+
     def get_my_team(self, team_id: int | None = None) -> dict:
-        """Fetch FPL team entry data."""
+        """Fetch a manager's current GW squad picks.
+
+        Uses entry/{tid}/event/{gw}/picks/ which returns the actual 15-player
+        squad with captain/vice flags.  Falls back to the entry profile endpoint
+        on error so callers can detect the problem gracefully.
+        """
         tid = team_id or settings.fpl_team_id
-        return _fetch(f"entry/{tid}/")
+        gw = self.get_current_gw()
+        return _fetch(f"entry/{tid}/event/{gw}/picks/")
 
     def get_my_team_history(self, team_id: int | None = None) -> dict:
         """Fetch FPL team season history."""

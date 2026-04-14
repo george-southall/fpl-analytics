@@ -103,11 +103,14 @@ def run_projections(
 
     logger.info(f"Projecting {len(players_df)} players over GWs: {upcoming_gws}")
 
+    # Derive current GW (last completed = first upcoming minus 1)
+    current_gw = (upcoming_gws[0] - 1) if upcoming_gws else None
+
     # ── Merge in per-90 rates ─────────────────────────────────────────────────
     players = _build_per90_rates(players_df, understat_df)
 
     # ── Compute expected minutes for each player (baseline GW) ───────────────
-    players = compute_xmins(players, history_map, dgw_ids=dgw_ids)
+    players = compute_xmins(players, history_map, dgw_ids=dgw_ids, current_gw=current_gw)
 
     # ── Fixture difficulty for all upcoming GWs ───────────────────────────────
     difficulty_df = compute_fixture_difficulty(fixtures_df, model, upcoming_gws)

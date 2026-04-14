@@ -109,6 +109,7 @@ TEAM_NAME_MAP = {
     "Liverpool": "Liverpool",
     "Man City": "Manchester City",
     "Man Utd": "Manchester United",
+    "Man United": "Manchester United",
     "Newcastle": "Newcastle",
     "Nott'm Forest": "Nottingham Forest",
     "Southampton": "Southampton",
