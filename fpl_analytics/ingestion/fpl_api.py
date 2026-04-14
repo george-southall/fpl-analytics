@@ -102,10 +102,10 @@ class FPLClient:
         return self._bootstrap
 
     def _build_teams_map(self) -> dict[int, str]:
-        """Build mapping of team_id → team short_name from bootstrap."""
+        """Build mapping of team_id → canonical full team name from bootstrap."""
         if not self._teams_map:
             bootstrap = self.get_bootstrap()
-            self._teams_map = {t["id"]: t["short_name"] for t in bootstrap["teams"]}
+            self._teams_map = {t["id"]: t["name"] for t in bootstrap["teams"]}
         return self._teams_map
 
     # ── DataFrames ────────────────────────────────────────────────
@@ -168,7 +168,7 @@ class FPLClient:
             teams.append(
                 {
                     "id": t["id"],
-                    "name": normalise_team_name(t["short_name"]),
+                    "name": normalise_team_name(t["name"]),
                     "full_name": t["name"],
                     "short_name": t["short_name"],
                     "strength": t.get("strength"),

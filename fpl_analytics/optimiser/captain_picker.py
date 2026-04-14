@@ -106,8 +106,8 @@ def pick_captain(
         vice_captain_ownership=round(float(vice[ownership_col]), 1),
         differential_captain=diff_name,
         differential_captain_id=diff_id,
-        differential_captain_xpts=round(diff_xpts, 2) if diff_xpts else None,
-        differential_captain_ownership=round(diff_ownership, 1) if diff_ownership else None,
+        differential_captain_xpts=round(diff_xpts, 2) if diff_xpts is not None else None,
+        differential_captain_ownership=round(diff_ownership, 1) if diff_ownership is not None else None,
         all_candidates=candidates,
     )
 

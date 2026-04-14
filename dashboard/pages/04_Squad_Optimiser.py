@@ -18,7 +18,7 @@ st.title("🧮 Squad Optimiser")
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.header("Settings")
-    budget = st.slider("Budget (£m)", 80.0, 105.0, 100.0, step=0.5)
+    budget = st.slider("Budget (£m)", 80.0, 115.0, 110.0, step=0.5)
     horizon = st.radio("Projection window", [1, 3, 6], index=2, horizontal=True)
     run_btn = st.button("⚡ Optimise squad", type="primary", use_container_width=True)
 
