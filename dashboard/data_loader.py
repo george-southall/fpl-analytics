@@ -13,7 +13,9 @@ import streamlit as st
 
 @st.cache_resource(show_spinner="Fitting Dixon-Coles model…")
 def load_model():
-    """Fit Dixon-Coles on historical results. Cached for the session."""
+    """Fit Dixon-Coles on historical results, then register any current PL teams
+    that have no historical data (e.g. newly promoted sides like Sunderland)."""
+    from fpl_analytics.ingestion.fpl_api import FPLClient
     from fpl_analytics.ingestion.results_fetcher import apply_time_decay, fetch_all_seasons
     from fpl_analytics.models.team_strengths import TeamStrengths
 
@@ -21,6 +23,15 @@ def load_model():
     results_df = apply_time_decay(results_df)
     ts = TeamStrengths()
     ts.fit(results_df)
+
+    # Inject any current PL team missing from the model with average parameters
+    try:
+        current_teams = FPLClient().get_teams_df()["name"].tolist()
+        for team in current_teams:
+            ts.model.register_team(team)
+    except Exception:
+        pass  # non-critical: fixtures for unknown teams already default to difficulty 3
+
     return ts
 
 
