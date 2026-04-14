@@ -4,6 +4,11 @@ Heat map: teams × upcoming GWs, coloured by difficulty (1=easy, 5=hard).
 Toggle between attacking view (xG for) and defensive view (CS probability).
 """
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+
 import numpy as np
 import plotly.graph_objects as go
 import streamlit as st

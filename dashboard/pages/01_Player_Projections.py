@@ -4,6 +4,11 @@ Filterable, sortable table showing GW-by-GW expected points for all players.
 Click a player to see their full scoring breakdown.
 """
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st

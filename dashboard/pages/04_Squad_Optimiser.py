@@ -4,6 +4,11 @@ Runs the PuLP LP to select an optimal 15-man squad and displays it
 on an interactive pitch graphic.
 """
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+
 import plotly.graph_objects as go
 import streamlit as st
 
