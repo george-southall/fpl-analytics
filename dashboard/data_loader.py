@@ -75,5 +75,24 @@ def get_current_gw() -> int:
     return gws[0] if gws else 38
 
 
+@st.cache_resource(show_spinner="Training price change model…")
+def load_price_model(force_retrain: bool = False):
+    """Load or train the XGBoost price change model. Cached for the session."""
+    from fpl_analytics.price_changes.alerts import load_or_train_model
+
+    players, _, _, _ = load_fpl_data()
+    return load_or_train_model(players, force_retrain=force_retrain)
+
+
+@st.cache_data(ttl=1800, show_spinner="Generating price alerts…")
+def load_price_alerts():
+    """Return price alert DataFrame (refreshed every 30 min)."""
+    from fpl_analytics.price_changes.alerts import generate_alerts
+
+    players, _, _, _ = load_fpl_data()
+    model = load_price_model()
+    return generate_alerts(players, model=model)
+
+
 POSITION_COLOURS = {"GK": "#f6c90e", "DEF": "#00c2a8", "MID": "#6ecbf5", "FWD": "#e84855"}
 DIFFICULTY_COLOURS = {1: "#00c2a8", 2: "#a3d977", 3: "#f6c90e", 4: "#f4845f", 5: "#e84855"}
